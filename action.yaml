@@ -1,0 +1,158 @@
+name: Bump Version
+description: Action to bump the version of a project
+inputs:
+  auth-token:
+    description: Node Auth token
+    required: false
+    default: ""
+  working-dir:
+    description: The working directory of the project
+    required: false
+    default: "."
+  node:
+    description: Node version
+    required: false
+    default: ""
+  is-yarn:
+    description: Whether this is a yarn project
+    required: false
+    default: "false"
+  python:
+    description: Python version
+    required: false
+    default: ""
+  go:
+    description: Go version
+    required: false
+    default: ""
+  build-proto:
+    description: Build proto files
+    required: false
+    default: "false"
+  protoc-go:
+    description: Version of protoc-gen-go library
+    required: false
+    default: "latest"
+  proto-grpc:
+    description: Version of protoc-gen-go-grpc library
+    required: false
+    default: "latest"
+  java:
+    description: Java version
+    required: false
+    default: ""
+  dotnet:
+    description: .NET version
+    required: false
+    default: ""
+  framework:
+    description: Is .NET framework?
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+##### Setup Node
+
+    - name: Setup Node
+      if: ${{ inputs.node != '' }}
+      uses: actions/setup-node@v2
+      with:
+        node-version: ${{ inputs.node }}
+        registry-url: "https://npm.pkg.github.com"
+        scope: "@beezlabs-org"
+
+    - name: Install Node Dependencies
+      if: ${{ inputs.node != '' }}
+      env:
+        NODE_AUTH_TOKEN: ${{ inputs.auth-token }}
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ "${{ inputs.is-yarn }}" = "true" ]; then
+          yarn install --frozen-lockfile
+        else
+          npm ci
+        fi
+      shell: bash
+
+##### Setup Python
+
+    - name: Setup Python
+      if: ${{ inputs.python != '' }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: '${{ inputs.python }}'
+
+    - name: Install Python Dependencies
+      if: ${{ inputs.python != '' }}
+      run: |
+        pip install -r requirements.txt
+      shell: bash
+
+##### Setup Go
+
+    - name: Configure Git for Go
+      if: ${{ inputs.go != '' && inputs.auth-token != '' }}
+      run: |
+        git config --global url."https://${{ inputs.auth-token }}@github.com/".insteadOf https://github.com/
+      shell: bash
+
+    - name: Setup Go
+      if: ${{ inputs.go != '' }}
+      uses: actions/setup-go@v2
+      with:
+        go-version: "~${{ inputs.go }}"
+
+    - name: Download and Install Protoc
+      if: ${{ inputs.go != '' && inputs.build-proto == 'true' }}
+      run: |
+        curl -L https://github.com/protocolbuffers/protobuf/releases/download/v3.19.4/protoc-3.19.4-linux-x86_64.zip -o ~/protoc-3.19.4-linux-x86_64.zip -s
+        mkdir ~/protobuf
+        unzip ~/protoc-3.19.4-linux-x86_64.zip -d ~/protobuf
+        sudo ln -s ~/protobuf/bin/protoc /usr/local/bin/protoc
+        go install google.golang.org/protobuf/cmd/protoc-gen-go@${{ inputs.protoc-go }}
+        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${{ inputs.protoc-grpc }}
+      shell: bash
+
+    - name: Build Protobuffers
+      if: ${{ inputs.go != '' && inputs.build-proto == 'true' }}
+      run: |
+        chmod +x ./hack/generate_proto.sh
+        ./hack/generate_proto.sh
+      shell: bash
+
+    - name: Install Go Dependencies
+      if: ${{ inputs.go != '' }}
+      run: |
+        go mod download
+      shell: bash
+
+##### Setup Java
+
+    - name: Setup Java
+      if: ${{ inputs.java != '' }}
+      uses: actions/setup-java@v1
+      with:
+        java-version: '${{ inputs.java }}'
+
+##### Setup Dot Net
+
+    - name: Setup .NET
+      if: ${{ inputs.dotnet != '' && inputs.framework == 'false' }}
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '${{ inputs.dotnet }}'
+
+    - name: Restore NuGet packages
+      if: ${{ inputs.dotnet != '' }}
+      run: |
+        if [ "${{ inputs.framework }}" = "true" ]; then
+          nuget restore
+        else
+          dotnet nuget restore
+        fi
+      shell: bash
